@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Jardim dos Ecos - v3.5 Efeito Isométrico Removido</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;700&display=swap');
+
+        /* --- ESTILOS GERAIS --- */
+        body { font-family: 'Inter', sans-serif; background-color: #0c0a1e; touch-action: manipulation; overflow-x: hidden; overflow-y: hidden; }
+        .pixel-font { font-family: 'Pixelify Sans', sans-serif; }
+        
+        #game-container {
+            width: 100%; height: 100vh; max-width: 450px; margin: auto;
+            display: flex; flex-direction: column; position: relative;
+            background-color: #111827; border-radius: 1.5rem;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.6); overflow: clip;
+        }
+
+        #garden-canvas { 
+            display: block; touch-action: none; cursor: pointer; 
+            width: 100%; height: 100%; position: absolute;
+            top: 0; left: 0; z-index: 1;
+        }
+
+        /* --- ESTILOS DA HUD --- */
+        .hud { position: absolute; width: 100%; z-index: 10; pointer-events: none; }
+        .hud-top { top: 1rem; left: 0; padding: 0 1rem; }
+        .hud-bottom { bottom: 1rem; left: 0; padding: 0 1rem; }
+        .hud-button, .plant-preview-button { pointer-events: all; transition: all 0.2s ease-in-out; transform: translateY(0); }
+        .hud-button:hover, .plant-preview-button:hover:not(:disabled) { transform: translateY(-2px); filter: brightness(1.1); }
+        
+        .resource-bar { background-color: rgba(0,0,0,0.3); border-radius:9999px; height:12px; border: 2px solid rgba(255,255,255,0.2); }
+        .progress-fill { transition: width 0.6s ease-out; border-radius:9999px; background-image: linear-gradient(to right, #8b5cf6, #ec4899); }
+        
+        #plant-selector {
+            display: flex; gap: 0.5rem; overflow-x: auto; white-space: nowrap;
+            -webkit-overflow-scrolling: touch; scrollbar-width: none;
+            pointer-events: all; cursor: grab;
+            user-select: none; 
+            touch-action: pan-x;
+            padding: 0.5rem 0;        /* 👈 dá espaço interno pro scroll */
+            min-height: 60px;        /* 👈 garante área visível mesmo sem botões */
+            max-width: 100%;
+            min-width: 100%;
+        }
+
+        #plant-selector.active { cursor: grabbing; }
+        #plant-selector::-webkit-scrollbar { display: none; }
+
+        .plant-preview-button {
+            width: 60px; height: 60px; flex-shrink: 0;
+            background-color: rgba(0,0,0,0.3); border: 2px solid rgba(255,255,255,0.2);
+            border-radius: 0.75rem; display: flex; flex-direction:column; justify-content: center; align-items: center; position: relative;
+        }
+        .plant-preview-button.active { border-color: #fde047; box-shadow: 0 0 15px rgba(253, 224, 71, 0.7); }
+        .plant-preview-button:disabled { filter: grayscale(1); opacity: 0.5; cursor: not-allowed; }
+        
+        .buy-button { background-image: linear-gradient(to right, #8b5cf6, #ec4899); border-radius: 1rem; padding: 0.75rem 1.5rem; font-size: 1.125rem; font-weight: bold; color: white; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
+        .buy-button:disabled { background-image: none; background-color: #4b5563; cursor: not-allowed; }
+
+        /* --- ESTILOS DOS MODAIS --- */
+        .modal { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(12, 10, 30, 0.8); backdrop-filter: blur(8px); z-index: 20; display: flex; justify-content: center; align-items: center; padding: 1rem; opacity: 0; transition: opacity 0.3s ease-in-out; pointer-events: none; }
+        .modal:not(.hidden) { opacity: 1; pointer-events: all; }
+        .modal-content { background-color: #1f2937; padding: 1.5rem; border-radius: 1.5rem; border: 2px solid rgba(255,255,255,0.2); width: 100%; max-width: 380px; }
+        .sell-button-group button { background-color: #991b1b; color: white; border-radius: 0.5rem; padding: 0.5rem 0.75rem; font-size: 0.75rem; }
+        .sell-active-visual { animation: pulse-red 1s infinite alternate; }
+        @keyframes pulse-red {
+            from { box-shadow: 0 0 10px rgba(255, 60, 60, 0.6); }
+            to { box-shadow: 0 0 20px rgba(255, 120, 120, 0.9); }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <div id="game-container">
+        <canvas id="garden-canvas"></canvas>
+
+        <div class="hud hud-top">
+            <div class="flex justify-between items-center gap-4">
+                <div class="flex items-center gap-2">
+                    <button id="settings-button" onclick="gameEngine.toggleSettings()" class="hud-button bg-black/30 backdrop-blur-sm p-3 rounded-full border-2 border-white/20">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                    </button>
+                </div>
+                <div class="flex items-center gap-4 bg-black/30 backdrop-blur-sm p-2 rounded-full border-2 border-white/20">
+                    <div class="flex items-center gap-1 pl-1">
+                        <span id="energy-icon" class="text-xl">☀️</span>
+                        <span id="energy-display" class="font-bold text-lg text-yellow-300 pixel-font">0</span>
+                    </div>
+                    <div class="flex items-center gap-1 pr-1">
+                        <span class="text-xl">💧</span>
+                        <span id="level-display" class="font-bold text-lg text-green-400 pixel-font">1</span>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4 bg-black/30 backdrop-blur-sm p-2 px-3 rounded-full border-2 border-white/20">
+                     <div class="flex items-center gap-1">
+                        <span class="text-xl">🌱</span>
+                        <span id="plant-count-display" class="font-bold text-lg text-green-400 pixel-font">0 / 6</span>
+                    </div>
+                </div>
+            </div>
+            <div class="w-full mt-3 bg-black/30 backdrop-blur-sm p-2 rounded-full border-2 border-white/20">
+                <div class="flex justify-between items-center mb-1 px-2">
+                    <p class="text-xs text-gray-400">Progresso Era: <span id="era-progress-label">0%</span></p>
+                    <p class="text-xs text-gray-400 flex items-center space-x-1">
+                        <span>💧</span>
+                        <span id="auto-collect-rate">0.0</span>
+                        <span class="text-purple-400">/s</span>
+                    </p>
+                </div>
+                <div class="resource-bar mx-1">
+                    <div id="era-progress-bar" class="progress-fill" style="width: 0%;"></div>
+                </div>
+                <p class="text-xs text-center text-purple-400 mt-1 pixel-font">Era da <span id="era-display">Despertar</span></p>
+            </div>
+        </div>
+
+        <div class="hud hud-bottom flex flex-col items-center gap-4">
+            <div id="plant-selector"></div>
+            <div id="buy-button-container">
+                <button id="buy-plant-button" onclick="gameEngine.buySelectedPlant()" class="hud-button buy-button pixel-font">SELECIONE UMA SEMENTE</button>
+            </div>
+        </div>
+
+        <div id="settings-modal" class="modal hidden">
+            <div class="modal-content flex flex-col gap-4">
+                <div class="flex justify-between items-center">
+                    <h2 class="text-2xl font-bold text-white pixel-font">Menu</h2>
+                    <button onclick="gameEngine.toggleSettings()" class="hud-button text-white text-3xl">&times;</button>
+                </div>
+                <div class="bg-black/20 p-4 rounded-lg">
+                    <h3 class="text-lg font-semibold text-gray-300 mb-3 pixel-font">Ferramentas de Jardinagem</h3>
+                    <div class="flex flex-col gap-3">
+                        <button id="sell-mode-button" onclick="gameEngine.toggleSellMode(); gameEngine.toggleSettings();" class="w-full px-4 py-3 bg-gray-700 text-white font-bold rounded-lg hud-button pixel-font text-base">Ativar Modo Venda</button>
+                        <div class="flex justify-between items-center sell-button-group gap-2">
+                            <span class="text-sm text-gray-400">Venda Rápida:</span>
+                            <button onclick="gameEngine.massSellByLevel(1)" class="hud-button">Vender L1</button>
+                            <button onclick="gameEngine.massSellByLevel(2)" class="hud-button">Vender L2</button>
+                            <button onclick="gameEngine.massSellByLevel(3)" class="hud-button">Vender L3</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="text-center text-gray-500 text-xs mt-2 pixel-font">
+                    <p>Jardim dos Ecos v3.5 - Efeito Isométrico Removido</p>
+                    <p class="mt-2">Desenvolvido por <a href="https://github.com/walbarellos" target="_blank" class="text-purple-400 font-bold hover:underline">Ben Noah</a></p>
+                </div>
+            </div>
+        </div>
+        <div id="story-modal" class="modal hidden">
+             <div class="modal-content flex flex-col gap-4 text-gray-300">
+                <h2 class="text-3xl font-bold text-white pixel-font text-center">O Jardim dos Ecos</h2>
+                <p class="text-sm leading-relaxed text-center">No coração do cosmos, a Grande Árvore Eco adoeceu. Você, um Tecelão de Ecos, deve restaurar a harmonia. Plante <span class="font-bold text-purple-400">Conectores de Energia</span> para colher <span class="font-bold text-yellow-300">Luz Estelar</span> (☀️) de dia e <span class="font-bold text-blue-300">Centelhas Lunares</span> (🌙) à noite. Transforme-as em <span class="font-bold text-green-400">Essência Vital</span> (💧) para curar a Grande Árvore e despertar o jardim de seu sono.</p>
+                <button onclick="gameEngine.hideStory()" class="hud-button buy-button pixel-font mt-2">INICIAR A JORNADA</button>
+            </div>
+        </div>
+    </div>
+    <script src="js/main.js"></script>
+</body>
+</html>
+
